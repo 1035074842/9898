@@ -1,0 +1,123 @@
+// 配置信息（替换为你的GitHub信息！）
+const CONFIG = {
+    owner: "1035074842", // 如 "username123"
+    repo: "9898",        // 如 "github-sign-system"
+    token: "git pull origin main --allow-unrelated-histories", // 步骤1生成的Token
+    label: "sign-record"      // 用于标记“签到记录”的Issue标签（自动创建）
+};
+
+// 1. 提交签到：创建GitHub Issue存储签到数据
+async function submitSign() {
+    const username = document.getElementById("username").value.trim();
+    const remark = document.getElementById("remark").value.trim();
+    const signMsg = document.getElementById("signMsg");
+
+    // 表单验证
+    if (!username) {
+        signMsg.style.color = "red";
+        signMsg.textContent = "请输入你的名字/昵称！";
+        return;
+    }
+
+    // 签到数据（Issue标题和正文用于存储信息）
+    const signTime = new Date().toLocaleString("zh-CN", { 
+        year: "numeric", month: "2-digit", day: "2-digit", 
+        hour: "2-digit", minute: "2-digit" 
+    });
+    const issueTitle = `[签到记录] ${username} - ${signTime}`;
+    const issueBody = `
+        **签到人**：${username}  
+        **签到时间**：${signTime}  
+        **备注**：${remark || "无"}  
+    `;
+
+    try {
+        // 调用GitHub API创建Issue
+        const response = await fetch(`https://api.github.com/repos/${CONFIG.owner}/${CONFIG.repo}/issues`, {
+            method: "POST",
+            headers: {
+                "Authorization": `token ${CONFIG.token}`, // 认证Token
+                "Accept": "application/vnd.github.v3+json",
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+                title: issueTitle,
+                body: issueBody,
+                labels: [CONFIG.label] // 给Issue打标签，方便后续筛选
+            })
+        });
+
+        if (response.ok) {
+            signMsg.style.color = "green";
+            signMsg.textContent = "签到成功！记录已保存～";
+            // 清空表单并刷新记录
+            document.getElementById("username").value = "";
+            document.getElementById("remark").value = "";
+            loadSignRecords(); // 刷新历史记录
+        } else {
+            const error = await response.json();
+            throw new Error(error.message);
+        }
+    } catch (err) {
+        signMsg.style.color = "red";
+        signMsg.textContent = `签到失败：${err.message}`;
+    }
+}
+
+// 2. 加载历史签到记录：读取所有带“sign-record”标签的Issue
+async function loadSignRecords() {
+    const recordsList = document.getElementById("recordsList");
+    recordsList.innerHTML = "正在加载历史记录...";
+
+    try {
+        // 调用GitHub API筛选标签为“sign-record”的Issue（按创建时间倒序）
+        const response = await fetch(
+            `https://api.github.com/repos/${CONFIG.owner}/${CONFIG.repo}/issues?labels=${CONFIG.label}&sort=created&direction=desc`,
+            {
+                headers: {
+                    "Accept": "application/vnd.github.v3+json",
+                    // 非创建操作可不用Token，但认证后速率限制更高（未认证每小时60次，认证后5000次）
+                    "Authorization": `token ${CONFIG.token}`
+                }
+            }
+        );
+
+        if (response.ok) {
+            const issues = await response.json();
+            if (issues.length === 0) {
+                recordsList.innerHTML = "暂无签到记录～";
+                return;
+            }
+
+            // 渲染签到记录
+            let html = "";
+            issues.forEach((issue, index) => {
+                // 解析Issue正文中的签到信息（也可直接用issue.title和issue.created_at）
+                const match = issue.body.match(/\*\*签到人\*\*：(.*?)\s+\*\*签到时间\*\*：(.*?)\s+\*\*备注\*\*：(.*?)\s+/);
+                const name = match ? match[1] : "未知用户";
+                const time = match ? match[2] : new Date(issue.created_at).toLocaleString("zh-CN");
+                const remark = match ? match[3] : "无";
+
+                html += `
+                    <div class="record-item">
+                        <p><strong>${index + 1}. 签到人</strong>：${name}</p>
+                        <p><strong>时间</strong>：${time}</p>
+                        <p><strong>备注</strong>：${remark}</p>
+                        <p style="font-size: 12px; color: #666;">
+                            记录链接：<a href="${issue.html_url}" target="_blank">查看原始记录</a>
+                        </p>
+                    </div>
+                `;
+            });
+            recordsList.innerHTML = html;
+        } else {
+            const error = await response.json();
+            throw new Error(error.message);
+        }
+    } catch (err) {
+        recordsList.innerHTML = `加载失败：${err.message}`;
+    }
+}
+
+// 页面加载时自动加载历史记录
+window.onload = loadSignRecords;
